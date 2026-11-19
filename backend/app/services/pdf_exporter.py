@@ -132,6 +132,14 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
         "QBody", parent=styles["Normal"], fontName="Helvetica",
         fontSize=9.5, leading=14, textColor=body,
     )
+    once_hdr_style = ParagraphStyle(
+        "OnceHdr", parent=styles["Normal"], fontName="Helvetica-Bold",
+        fontSize=10, leading=14, textColor=slate, spaceBefore=8, spaceAfter=6,
+    )
+    once_item_style = ParagraphStyle(
+        "OnceItem", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=8.8, leading=12.5, textColor=slate, leftIndent=6, spaceAfter=5,
+    )
 
     story = []
 
@@ -156,15 +164,15 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
 
     sorted_units = sorted(unit_groups.keys(), key=_unit_sort_key)
 
-    story.append(Paragraph("Unit-Wise Question Summary", h2_style))
-    overview_rows = [["Unit", "Total Topics", "Repeated (2+ Papers)", "Asked Once"]]
+    story.append(Paragraph("Unit-Wise Study Plan", h2_style))
+    overview_rows = [["Unit", "Core Repeated Topics (2+)", "Asked Once (Optional)"]]
     for u in sorted_units:
         cls = unit_groups[u]
         rep = sum(1 for c in cls if c.unique_paper_count >= 2)
         once = len(cls) - rep
-        overview_rows.append([u, str(len(cls)), str(rep), str(once)])
+        overview_rows.append([u, str(rep), str(once)])
 
-    ov_table = Table(overview_rows, colWidths=[56 * mm, 32 * mm, 48 * mm, 38 * mm])
+    ov_table = Table(overview_rows, colWidths=[64 * mm, 58 * mm, 52 * mm])
     ov_table.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), ink),
@@ -183,9 +191,9 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
 
     repeated_all = [c for c in analysis.clusters if c.unique_paper_count >= 2]
     if repeated_all:
-        story.append(Paragraph("Top Repeated Topics (Must Revise First)", h2_style))
+        story.append(Paragraph("Top Repeated Concepts (Revise First)", h2_style))
         chk_rows = [["#", "Unit", "Topic", "Frequency"]]
-        for i, cl in enumerate(repeated_all[:15], start=1):
+        for i, cl in enumerate(repeated_all[:18], start=1):
             u_short = (cl.unit_label or "-").split("·")[0].strip()
             chk_rows.append([
                 str(i),
@@ -216,18 +224,22 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
             key=lambda c: (c.unique_paper_count, c.total_occurrences),
             reverse=True,
         )
-        total_u_qs = sum(len(c.questions) for c in unit_clusters)
+        rep_clusters = [c for c in unit_clusters if c.unique_paper_count >= 2]
+        once_clusters = [c for c in unit_clusters if c.unique_paper_count < 2]
 
-        # Clean Editorial Unit Header
+        # If a unit only has single-paper clusters (e.g. 1 paper uploaded), show them as main
+        main_clusters = rep_clusters if rep_clusters else once_clusters
+        bonus_clusters = once_clusters if rep_clusters else []
+
         hdr_table = Table(
             [[
                 Paragraph(escape(unit_name.upper()), unit_title_style),
                 Paragraph(
-                    f"{len(unit_clusters)} Topics  ·  {total_u_qs} Questions",
+                    f"{len(main_clusters)} Core Topics  ·  {len(bonus_clusters)} Asked Once",
                     unit_sub_style,
                 ),
             ]],
-            colWidths=[104 * mm, 70 * mm],
+            colWidths=[96 * mm, 78 * mm],
         )
         hdr_table.setStyle(
             TableStyle([
@@ -241,7 +253,7 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
         story.append(hdr_table)
         story.append(Spacer(1, 14))
 
-        for idx, cl in enumerate(unit_clusters, start=1):
+        for idx, cl in enumerate(main_clusters, start=1):
             if cl.priority == PriorityTier.HIGH:
                 b_style = rep_high_style
                 tag = "MUST PREPARE"
@@ -252,7 +264,7 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
                 bar_col = med_col
             else:
                 b_style = rep_low_style
-                tag = "ASKED ONCE" if cl.unique_paper_count == 1 else "LOW FREQUENCY"
+                tag = "REPEATED" if cl.unique_paper_count >= 2 else "ASKED ONCE"
                 bar_col = colors.HexColor("#94A3B8")
 
             topic_p = Paragraph(f"{idx}. {escape(cl.topic_title)}", topic_style)
@@ -291,7 +303,6 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
                 )
                 q_cards.append(card)
 
-            # Keep topic header + first question card together so title is never orphaned
             first_group = [topic_p, badge_p]
             if q_cards:
                 first_group.append(q_cards[0])
@@ -301,8 +312,27 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
                 story.append(Spacer(1, 5))
                 story.append(extra_card)
 
-            # Generous spacing between different topics
-            story.append(Spacer(1, 15))
+            story.append(Spacer(1, 14))
+
+        # Compact "Asked Only Once" Appendix at end of Unit
+        if bonus_clusters:
+            story.append(HRFlowable(width="100%", thickness=0.6, color=border_soft, spaceAfter=6))
+            story.append(
+                Paragraph(
+                    f"Asked Only Once in {escape(unit_name)} (Optional — Revise After Core Topics)",
+                    once_hdr_style,
+                )
+            )
+            for cl in bonus_clusters:
+                for q in cl.questions:
+                    marks_str = f" [{q.marks}M]" if q.marks is not None else ""
+                    story.append(
+                        Paragraph(
+                            f"• <b>{escape(q.paper_name)} · {escape(q.question_number)}{marks_str}:</b> "
+                            f"{escape(q.exact_text)}",
+                            once_item_style,
+                        )
+                    )
 
     doc.build(story, canvasmaker=CleanBookCanvas)
     pdf_bytes = buf.getvalue()

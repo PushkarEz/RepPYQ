@@ -85,7 +85,6 @@ def _encode_via_hf_api(texts: List[str], token: str) -> np.ndarray | None:
 
 
 def _encode_lightweight_hybrid(texts: List[str]) -> np.ndarray:
-    """Zero-RAM-spike fallback using word (1,2)-grams + char_wb (3,5)-grams."""
     word_vec = HashingVectorizer(
         n_features=768, ngram_range=(1, 2), stop_words="english", alternate_sign=False
     )
@@ -109,14 +108,12 @@ def encode_texts(texts: List[str]) -> np.ndarray:
     if not texts:
         return np.zeros((0, 384), dtype=np.float32)
 
-    # 1. Free cloud neural embeddings if HF_TOKEN is set (0 MB RAM)
     hf_token = os.getenv("HF_TOKEN", "").strip()
     if hf_token:
         hf_embs = _encode_via_hf_api(texts, hf_token)
         if hf_embs is not None:
             return hf_embs
 
-    # 2. Local neural embeddings if sentence-transformers is installed
     if SentenceTransformer is not None:
         model = get_embedding_model()
         embeddings = model.encode(
@@ -124,7 +121,6 @@ def encode_texts(texts: List[str]) -> np.ndarray:
         )
         return embeddings.astype(np.float32)
 
-    # 3. Lightweight 512MB-safe fallback
     return _encode_lightweight_hybrid(texts)
 
 
@@ -181,9 +177,7 @@ def cluster_questions(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if questions[i].paper_id == questions[j].paper_id:
-                dist_matrix[i, j] = dist_matrix[j, i] = 2.0
-                continue
+            # Keep distinct SPPU units separate, but allow same-concept questions in same paper to group
             ui, uj = questions[i].unit_number, questions[j].unit_number
             if ui and uj and ui != uj:
                 dist_matrix[i, j] = dist_matrix[j, i] = 2.0

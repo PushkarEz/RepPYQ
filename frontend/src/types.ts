@@ -37,6 +37,7 @@ export interface AnalysisResponse {
   analysis_id: string;
   subject_name: string;
   similarity_threshold: number;
+  grouping_mode?: string;
   total_papers: number;
   total_questions: number;
   papers: PaperInfo[];

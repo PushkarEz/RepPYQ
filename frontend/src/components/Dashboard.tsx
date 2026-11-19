@@ -21,6 +21,8 @@ interface DashboardProps {
   busy: boolean;
 }
 
+type FilterTab = "REPEATED" | "ALL" | PriorityTier;
+
 export const Dashboard: React.FC<DashboardProps> = ({
   analysis,
   onRecluster,
@@ -30,13 +32,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   busy,
 }) => {
   const [threshold, setThreshold] = useState(analysis.similarity_threshold);
-  const [priorityFilter, setPriorityFilter] = useState<"ALL" | PriorityTier>("ALL");
+  const [priorityFilter, setPriorityFilter] = useState<FilterTab>("REPEATED");
   const [unitFilter, setUnitFilter] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    const hasRepeated = analysis.clusters.some((c) => c.unique_paper_count >= 2);
+    setPriorityFilter(hasRepeated ? "REPEATED" : "ALL");
+
     const initial: Record<string, boolean> = {};
     analysis.clusters.forEach((c) => {
       initial[c.cluster_id] = c.priority === "High Priority";
@@ -56,7 +61,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const filteredClusters = useMemo(() => {
     return analysis.clusters.filter((c) => {
-      if (priorityFilter !== "ALL" && c.priority !== priorityFilter) return false;
+      if (priorityFilter === "REPEATED" && c.unique_paper_count < 2) return false;
+      if (
+        priorityFilter !== "ALL" &&
+        priorityFilter !== "REPEATED" &&
+        c.priority !== priorityFilter
+      ) {
+        return false;
+      }
       if (unitFilter !== "ALL") {
         const u = (c.unit_label || "").split("·")[0].trim();
         if (u !== unitFilter) return false;
@@ -76,10 +88,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [analysis.clusters, priorityFilter, unitFilter, search]);
 
   const counts = useMemo(() => {
+    const repeated = analysis.clusters.filter((c) => c.unique_paper_count >= 2).length;
     const high = analysis.clusters.filter((c) => c.priority === "High Priority").length;
     const med = analysis.clusters.filter((c) => c.priority === "Medium Priority").length;
     const low = analysis.clusters.filter((c) => c.priority === "Low / Unique").length;
-    return { high, med, low };
+    return { repeated, high, med, low };
   }, [analysis.clusters]);
 
   const toggleSelect = (id: string) => {
@@ -123,7 +136,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               {analysis.total_papers} papers · {analysis.total_questions} exact questions ·{" "}
-              {analysis.clusters.length} topics
+              {counts.repeated} repeated topics
+              {analysis.grouping_mode ? ` · ${analysis.grouping_mode}` : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -143,14 +157,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Chronological Paper Strip */}
         <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100 dark:border-[#272b36]">
           {analysis.papers.map((p) => (
             <span
               key={p.paper_id}
               className="text-[11px] sm:text-xs bg-slate-100 dark:bg-[#222631] text-slate-700 dark:text-slate-300 px-2.5 py-0.5 rounded-md font-medium"
             >
-              {p.paper_name} · {p.extracted_count} Qs
+              {p.paper_name} ({p.exam_type}) · {p.extracted_count} Qs
             </span>
           ))}
         </div>
@@ -173,7 +186,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="flex justify-between text-xs sm:text-sm mb-1">
               <span className="font-medium text-slate-700 dark:text-slate-300">
-                Grouping Strictness
+                Similarity Override Slider
               </span>
               <span className="font-mono text-xs bg-slate-100 dark:bg-[#222631] text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded">
                 {threshold.toFixed(2)}
@@ -216,6 +229,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="flex flex-wrap gap-1.5">
             {(
               [
+                ["REPEATED", `Repeated 2+ (${counts.repeated})`],
                 ["ALL", `All (${analysis.clusters.length})`],
                 ["High Priority", `High (${counts.high})`],
                 ["Medium Priority", `Medium (${counts.med})`],

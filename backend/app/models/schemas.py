@@ -46,6 +46,7 @@ class AnalysisResponse(BaseModel):
     analysis_id: str
     subject_name: str
     similarity_threshold: float
+    grouping_mode: str = "Semantic Similarity"
     total_papers: int
     total_questions: int
     papers: List[PaperInfo]

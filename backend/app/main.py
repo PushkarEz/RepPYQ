@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +20,7 @@ from app.models.schemas import (
     SplitQuestionRequest,
     UpdateLabelsRequest,
 )
+from app.services.ai_grouper import group_questions_with_ai
 from app.services.clustering import (
     chronological_paper_key,
     cluster_questions,
@@ -33,7 +34,7 @@ from app.services.question_parser import parse_questions
 
 load_dotenv()
 
-app = FastAPI(title="RepPYQ API", version="1.3.0")
+app = FastAPI(title="RepPYQ API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,6 +75,7 @@ class AnalysisSession:
     syllabus_units: List[str]
     unit_embeddings: Optional[np.ndarray]
     similarity_threshold: float
+    grouping_mode: str = "Semantic Similarity"
     clusters: List[QuestionCluster] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
@@ -97,13 +99,40 @@ def _resolve_cluster_unit(
     return base_unit
 
 
-def _build_cluster_objects(session: AnalysisSession) -> List[QuestionCluster]:
-    raw_clusters = cluster_questions(
-        session.questions, session.embeddings, session.similarity_threshold
-    )
+def _build_cluster_objects(
+    session: AnalysisSession, use_ai: bool = True
+) -> List[QuestionCluster]:
     total_papers = len(session.papers)
     cluster_objs: List[QuestionCluster] = []
 
+    if use_ai:
+        ai_grouped = group_questions_with_ai(session.subject_name, session.questions)
+        if ai_grouped is not None:
+            session.grouping_mode = "AI Concept Grouping"
+            for cid, title, q_list, conf in ai_grouped:
+                unique_papers = len({q.paper_id for q in q_list})
+                unit_lbl = _resolve_cluster_unit(
+                    q_list, session.syllabus_units, session.unit_embeddings
+                )
+                cluster_objs.append(
+                    QuestionCluster(
+                        cluster_id=cid,
+                        topic_title=title,
+                        unit_label=unit_lbl,
+                        priority=compute_priority_tier(unique_papers, total_papers),
+                        unique_paper_count=unique_papers,
+                        total_papers=total_papers,
+                        total_occurrences=len(q_list),
+                        avg_similarity=conf,
+                        questions=q_list,
+                    )
+                )
+            return cluster_objs
+
+    session.grouping_mode = "Semantic Similarity"
+    raw_clusters = cluster_questions(
+        session.questions, session.embeddings, session.similarity_threshold
+    )
     for cid, q_list, avg_sim in raw_clusters:
         unique_papers = len({q.paper_id for q in q_list})
         title = generate_cluster_title(q_list)
@@ -131,6 +160,7 @@ def _to_response(session: AnalysisSession) -> AnalysisResponse:
         analysis_id=session.analysis_id,
         subject_name=session.subject_name,
         similarity_threshold=session.similarity_threshold,
+        grouping_mode=session.grouping_mode,
         total_papers=len(session.papers),
         total_questions=len(session.questions),
         papers=session.papers,
@@ -184,7 +214,7 @@ async def analyze_pdfs(
     files: List[UploadFile] = File(...),
     paper_labels_json: str = Form("[]"),
     subject_name: str = Form("Subject Revision Notes"),
-    similarity_threshold: float = Form(0.72),
+    similarity_threshold: float = Form(0.68),
     syllabus_text: str = Form(""),
 ):
     if not files:
@@ -256,7 +286,7 @@ async def analyze_pdfs(
         similarity_threshold=similarity_threshold,
         warnings=warnings,
     )
-    session.clusters = _build_cluster_objects(session)
+    session.clusters = _build_cluster_objects(session, use_ai=True)
     SESSIONS[analysis_id] = session
     return _to_response(session)
 
@@ -267,7 +297,7 @@ def recluster(analysis_id: str, payload: ReclusterRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Analysis session not found.")
     session.similarity_threshold = payload.similarity_threshold
-    session.clusters = _build_cluster_objects(session)
+    session.clusters = _build_cluster_objects(session, use_ai=False)
     return _to_response(session)
 
 
@@ -392,7 +422,7 @@ def export_pdf(analysis_id: str):
     pdf_bytes = build_revision_pdf(_to_response(session))
     safe_name = "".join(
         c if c.isalnum() or c in (" ", "-", "_") else "_" for c in session.subject_name
-    ).strip() or "PYQ_Revision_Notes"
+    ).strip() or "RepPYQ_Revision_Notes"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
