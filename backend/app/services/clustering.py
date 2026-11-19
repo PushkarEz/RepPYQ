@@ -1,15 +1,26 @@
 import math
+import os
 import re
 import uuid
 from typing import Dict, List, Set, Tuple
-import faiss
+import httpx
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.feature_extraction.text import HashingVectorizer
 
 from app.models.schemas import ExtractedQuestion, PriorityTier
 
-_MODEL_INSTANCE: SentenceTransformer | None = None
+try:
+    import faiss  # type: ignore
+except ImportError:
+    faiss = None
+
+try:
+    from sentence_transformers import SentenceTransformer  # type: ignore
+except ImportError:
+    SentenceTransformer = None
+
+_MODEL_INSTANCE = None
 
 STOPWORDS = {
     "what", "is", "are", "the", "a", "an", "in", "of", "and", "or", "for", "to",
@@ -27,7 +38,6 @@ MONTH_MAP = {
 
 
 def chronological_paper_key(paper_name: str, question_number: str = "") -> tuple:
-    """Sorts strictly by Year -> Month (May before Nov) -> Q.No (numeric)."""
     low = paper_name.lower()
     year_m = re.search(r"\b(20\d{2})\b", low)
     year = int(year_m.group(1)) if year_m else 9999
@@ -45,9 +55,52 @@ def chronological_paper_key(paper_name: str, question_number: str = "") -> tuple
     return (year, month, low, q_num, q_sub)
 
 
-def get_embedding_model() -> SentenceTransformer:
+def _l2_normalize(arr: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    return (arr / norms).astype(np.float32)
+
+
+def _encode_via_hf_api(texts: List[str], token: str) -> np.ndarray | None:
+    endpoints = [
+        "https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction",
+        "https://api-inference.huggingface.co/pipeline/feature-extraction/BAAI/bge-small-en-v1.5",
+    ]
+    headers = {"Authorization": f"Bearer {token}"}
+    for url in endpoints:
+        try:
+            resp = httpx.post(
+                url,
+                headers=headers,
+                json={"inputs": texts, "options": {"wait_for_model": True}},
+                timeout=30.0,
+            )
+            if resp.status_code == 200:
+                data = np.asarray(resp.json(), dtype=np.float32)
+                if data.ndim == 2 and data.shape[0] == len(texts):
+                    return _l2_normalize(data)
+        except Exception:
+            continue
+    return None
+
+
+def _encode_lightweight_hybrid(texts: List[str]) -> np.ndarray:
+    """Zero-RAM-spike fallback using word (1,2)-grams + char_wb (3,5)-grams."""
+    word_vec = HashingVectorizer(
+        n_features=768, ngram_range=(1, 2), stop_words="english", alternate_sign=False
+    )
+    char_vec = HashingVectorizer(
+        n_features=512, analyzer="char_wb", ngram_range=(3, 5), alternate_sign=False
+    )
+    w_mat = word_vec.transform(texts).toarray().astype(np.float32)
+    c_mat = char_vec.transform(texts).toarray().astype(np.float32)
+    combined = np.hstack([w_mat * 1.25, c_mat * 0.75])
+    return _l2_normalize(combined)
+
+
+def get_embedding_model():
     global _MODEL_INSTANCE
-    if _MODEL_INSTANCE is None:
+    if _MODEL_INSTANCE is None and SentenceTransformer is not None:
         _MODEL_INSTANCE = SentenceTransformer("BAAI/bge-small-en-v1.5")
     return _MODEL_INSTANCE
 
@@ -55,11 +108,24 @@ def get_embedding_model() -> SentenceTransformer:
 def encode_texts(texts: List[str]) -> np.ndarray:
     if not texts:
         return np.zeros((0, 384), dtype=np.float32)
-    model = get_embedding_model()
-    embeddings = model.encode(
-        texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
-    )
-    return embeddings.astype(np.float32)
+
+    # 1. Free cloud neural embeddings if HF_TOKEN is set (0 MB RAM)
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    if hf_token:
+        hf_embs = _encode_via_hf_api(texts, hf_token)
+        if hf_embs is not None:
+            return hf_embs
+
+    # 2. Local neural embeddings if sentence-transformers is installed
+    if SentenceTransformer is not None:
+        model = get_embedding_model()
+        embeddings = model.encode(
+            texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
+        )
+        return embeddings.astype(np.float32)
+
+    # 3. Lightweight 512MB-safe fallback
+    return _encode_lightweight_hybrid(texts)
 
 
 def _tech_tokens(text: str) -> Set[str]:
@@ -97,14 +163,17 @@ def cluster_questions(
     if n == 1:
         return [(str(uuid.uuid4()), questions, 1.0)]
 
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatIP(dim)
-    index.add(embeddings)
+    if faiss is not None:
+        dim = embeddings.shape[1]
+        index = faiss.IndexFlatIP(dim)
+        index.add(embeddings)
+        sims, idxs = index.search(embeddings, n)
+        sim_matrix = np.zeros((n, n), dtype=np.float32)
+        row_indices = np.arange(n)[:, None]
+        sim_matrix[row_indices, idxs] = sims
+    else:
+        sim_matrix = embeddings @ embeddings.T
 
-    sims, idxs = index.search(embeddings, n)
-    sim_matrix = np.zeros((n, n), dtype=np.float32)
-    row_indices = np.arange(n)[:, None]
-    sim_matrix[row_indices, idxs] = sims
     sim_matrix = np.clip((sim_matrix + sim_matrix.T) / 2.0, -1.0, 1.0)
 
     token_sets = [_tech_tokens(q.exact_text) for q in questions]
