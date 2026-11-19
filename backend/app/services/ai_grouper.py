@@ -18,6 +18,8 @@ from app.services.labeling import heuristic_topic_title
 
 def _extract_json_object(raw: str) -> Optional[dict]:
     cleaned = raw.strip()
+    # Strip reasoning tags if a reasoning model (e.g. qwen/deepseek) outputs <think>
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.S | re.I).strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned).strip()
     try:
@@ -32,11 +34,59 @@ def _extract_json_object(raw: str) -> Optional[dict]:
     return None
 
 
+def _discover_groq_models(api_key: str) -> List[str]:
+    """Fetches currently active & accessible chat models directly from Groq."""
+    env_model = os.getenv("GROQ_GROUP_MODEL", "").strip()
+    try:
+        resp = httpx.get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10.0,
+        )
+        if resp.status_code == 200:
+            items = resp.json().get("data", [])
+            ids = [
+                m["id"]
+                for m in items
+                if isinstance(m, dict)
+                and m.get("id")
+                and not any(
+                    bad in m["id"].lower()
+                    for bad in (
+                        "whisper", "tts", "guard", "safeguard",
+                        "embed", "audio", "orpheus", "vision",
+                    )
+                )
+            ]
+
+            def rank(mid: str) -> tuple:
+                low = mid.lower()
+                if "llama-4" in low or "70b" in low or "llama-3.3" in low:
+                    return (0, mid)
+                if "gpt-oss" in low or "kimi" in low or "gemma" in low or "8b" in low:
+                    return (1, mid)
+                if "qwen" in low or "deepseek" in low:
+                    return (2, mid)
+                return (3, mid)
+
+            ids.sort(key=rank)
+            if env_model and env_model in ids:
+                ids.remove(env_model)
+                ids.insert(0, env_model)
+            if ids:
+                return ids[:4]
+    except Exception:
+        pass
+
+    return [m for m in [env_model, "llama-3.3-70b-versatile", "openai/gpt-oss-20b"] if m]
+
+
 def _call_groq_group_unit(
     subject_name: str,
     unit_name: str,
     unit_questions: List[ExtractedQuestion],
     api_key: str,
+    models_to_try: List[str],
 ) -> Tuple[Optional[List[Tuple[str, List[int]]]], Optional[str]]:
     numbered_lines = "\n".join(
         f"{idx}: {q.exact_text}" for idx, q in enumerate(unit_questions)
@@ -57,33 +107,36 @@ def _call_groq_group_unit(
         f"Questions:\n{numbered_lines}"
     )
 
-    models_to_try = [
-        os.getenv("GROQ_GROUP_MODEL", "llama-3.3-70b-versatile").strip(),
-        "llama-3.1-8b-instant",
-    ]
-
     last_err = None
     for model in models_to_try:
+        use_json_mode = True
         for attempt in range(2):
             try:
+                body = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.1,
+                    "max_tokens": 3500,
+                }
+                if use_json_mode:
+                    body["response_format"] = {"type": "json_object"}
+
                 resp = httpx.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                        "response_format": {"type": "json_object"},
-                        "max_tokens": 2500,
-                    },
-                    timeout=30.0,
+                    json=body,
+                    timeout=35.0,
                 )
                 if resp.status_code == 429:
                     last_err = f"Groq rate limit (429) on {model}"
-                    time.sleep(1.5)
+                    time.sleep(1.8)
+                    continue
+                if resp.status_code == 400 and use_json_mode:
+                    # Some models don't support response_format=json_object
+                    use_json_mode = False
                     continue
                 if resp.status_code != 200:
-                    last_err = f"Groq HTTP {resp.status_code} on {model}: {resp.text[:120]}"
+                    last_err = f"Groq HTTP {resp.status_code} on {model}: {resp.text[:140]}"
                     break
 
                 raw_content = resp.json()["choices"][0]["message"]["content"]
@@ -126,16 +179,14 @@ def group_questions_with_ai(
     questions: List[ExtractedQuestion],
     fallback_threshold: float = 0.56,
 ) -> Tuple[Optional[List[Tuple[str, str, List[ExtractedQuestion], float]]], Optional[str]]:
-    """
-    Returns (clusters_or_None, diagnostic_error_or_None).
-    Never modifies original question text.
-    """
     raw_key = os.getenv("GROQ_API_KEY", "")
     api_key = raw_key.strip().strip('"').strip("'")
     if not api_key:
         return None, "GROQ_API_KEY is not set in environment."
     if not questions:
         return None, None
+
+    models_to_try = _discover_groq_models(api_key)
 
     by_unit: Dict[str, List[ExtractedQuestion]] = defaultdict(list)
     for q in questions:
@@ -154,9 +205,11 @@ def group_questions_with_ai(
             continue
 
         if unit_idx > 0:
-            time.sleep(0.35)
+            time.sleep(0.4)
 
-        grouped, err = _call_groq_group_unit(subject_name, unit_name, unit_qs, api_key)
+        grouped, err = _call_groq_group_unit(
+            subject_name, unit_name, unit_qs, api_key, models_to_try
+        )
         if not grouped:
             if err:
                 errors.append(f"{unit_name}: {err}")
