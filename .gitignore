@@ -18,3 +18,4 @@ generate_test_pdfs.py
 prep_deploy.py
 prep_free_deploy.py
 fix_vercel.py
+upgrade_pdf_design.py

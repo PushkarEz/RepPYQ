@@ -29,12 +29,11 @@ TRAILING_FLUFF_RE = re.compile(
 )
 
 DANGLING_TAIL_WORDS = {
-    "a", "an", "the", "of", "and", "or", "with", "in", "on", "for", "to", "which", "that", "is", "are"
+    "a", "an", "the", "of", "and", "or", "with", "in", "on", "for", "to", "which", "that", "is", "are", "its"
 }
 
 
 def heuristic_topic_title(questions: List[ExtractedQuestion]) -> str:
-    """Produces a crisp, plain-English topic title without dangling tail words."""
     shortest = min(questions, key=lambda q: len(q.exact_text)).exact_text
     is_numerical = bool(re.search(r"\b(?:calculate|determine|find|mhz|ghz|kw|mw|db|vswr|ohm)\b", shortest, re.I))
     text = shortest.strip().rstrip(".?:;")
@@ -48,23 +47,22 @@ def heuristic_topic_title(questions: List[ExtractedQuestion]) -> str:
     text = TRAILING_FLUFF_RE.sub("", text).strip(" ,.;:-")
     text = re.sub(r"^(?:the|an|a|of|about|on)\s+", "", text, flags=re.IGNORECASE)
 
-    # Cut cleanly at clause boundaries before max length
     clause = re.split(r"\s+(?:which|where|if\s+its|whose)\s+", text, maxsplit=1, flags=re.I)[0]
     text = clause.strip(" ,.;:-")
 
-    if len(text) > 58:
-        text = text[:58].rsplit(" ", 1)[0].rstrip(",;:")
+    if len(text) > 72:
+        text = text[:72].rsplit(" ", 1)[0].rstrip(",;:")
 
     words = text.split()
     while len(words) > 2 and words[-1].lower().rstrip(",;:") in DANGLING_TAIL_WORDS:
         words.pop()
     text = " ".join(words).rstrip(",;:-")
 
-    if is_numerical and "numerical" not in text.lower() and len(text) < 46:
+    if is_numerical and "numerical" not in text.lower() and len(text) < 56:
         text = f"{text} (Numerical)"
 
     if not text:
-        text = shortest[:52]
+        text = shortest[:60]
 
     return text[0].upper() + text[1:] if text else "Untitled Topic"
 
@@ -78,6 +76,8 @@ def match_syllabus_unit(
         return None
     combined_text = " ".join(q.exact_text for q in questions[:3])
     q_emb = encode_texts([combined_text])
+    if unit_embeddings.shape[1] != q_emb.shape[1]:
+        return None
     sims = (q_emb @ unit_embeddings.T)[0]
     best_idx = int(np.argmax(sims))
     if float(sims[best_idx]) >= 0.25:

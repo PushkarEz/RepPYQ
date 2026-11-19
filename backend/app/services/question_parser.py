@@ -16,12 +16,12 @@ SUB_Q_RE = re.compile(
 
 OR_LINE_RE = re.compile(r"^\s*(?:OR|O\.?R\.?|O\s+R)\s*$", re.IGNORECASE)
 
+# Also catches up to 2 stray diagram single-letters after marks like "[6] L"
 MARKS_END_RE = re.compile(
-    r"(?:\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\]|\(\s*(\d{1,2})\s*(?:M|Marks?)?\s*\)|[-–]\s*(\d{1,2})\s*Marks?)\s*$",
+    r"(?:\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\]|\(\s*(\d{1,2})\s*(?:M|Marks?)?\s*\)|[-–]\s*(\d{1,2})\s*Marks?)(?:\s+[A-Z]{1,2})?\s*$",
     re.IGNORECASE,
 )
 
-# Handles marks appearing right before sub-items like "Write a note on [5] i) Smart Cities"
 MARKS_BEFORE_ROMAN_RE = re.compile(
     r"\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\](?=\s+(?:i|ii|1)\s*[\)\.])",
     re.IGNORECASE,
@@ -46,7 +46,6 @@ def infer_sppu_unit(question_number: str, exam_type: str) -> Optional[str]:
         if q_num in (3, 4):
             return "Unit 2"
         return None
-    # SPPU 2019 Pattern Endsem
     if q_num in (1, 2):
         return "Unit 3"
     if q_num in (3, 4):
@@ -81,6 +80,7 @@ def _clean_verbatim_whitespace(text: str) -> str:
     text = re.sub(r"-\s*\n\s*", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\s+:", ":", text)
+    text = re.sub(r":{2,}", ":", text)
     return text
 
 
