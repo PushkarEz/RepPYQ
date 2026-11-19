@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary SEO Meta Tags -->
+    <title>RepPYQ — SPPU Question Paper Analyzer &amp; Repeated PYQ Extractor</title>
+    <meta
+      name="title"
+      content="RepPYQ — SPPU Question Paper Analyzer & Repeated PYQ Extractor"
+    />
+    <meta
+      name="description"
+      content="Free SPPU PYQ analyzer & repeated question extractor for Savitribai Phule Pune University (2019 & 2024 Pattern). Upload Insem and Endsem PDFs to automatically group repeated questions Unit 1 to Unit 6 and export clean revision notes."
+    />
+    <meta
+      name="keywords"
+      content="RepPYQ, SPPU PYQ, SPPU question paper analyzer, SPPU repeated questions, SPPU PYQ extractor, Pune University PYQ, SPPU 2019 pattern PYQ, SPPU Insem Endsem question bank, SPPU E&TC PYQ, SPPU Computer Engineering PYQ, SPPU IT PYQ, previous year question paper analyzer, exam repeat finder, Pushkar Shinde"
+    />
+    <meta name="author" content="Pushkar Shinde" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0F172A" />
+
+    <!-- Open Graph / Social Sharing -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_IN" />
+    <meta property="og:site_name" content="RepPYQ" />
+    <meta
+      property="og:title"
+      content="RepPYQ — SPPU Question Paper Analyzer & Repeated PYQ Extractor"
+    />
+    <meta
+      property="og:description"
+      content="Upload SPPU Insem & Endsem question paper PDFs. Instantly find repeated questions unit-by-unit (Unit 1–6) and download clean revision PDFs."
+    />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:title"
+      content="RepPYQ — SPPU Question Paper Analyzer & Repeated PYQ Extractor"
+    />
+    <meta
+      name="twitter:description"
+      content="Spot repeated SPPU exam questions across past papers unit-wise and export clean study PDFs."
+    />
+
+    <!-- Browser Tab Logo -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Structured Data (JSON-LD) for Search Engines -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "RepPYQ",
+        "alternateName": ["RepPYQ SPPU", "SPPU PYQ Extractor", "SPPU Question Paper Analyzer"],
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Web",
+        "description": "SPPU previous year question paper analyzer that extracts exact questions, detects repeated concepts across papers, maps SPPU Units 1 to 6, and exports unit-wise revision PDFs.",
+        "keywords": "SPPU PYQ, SPPU question paper extractor, SPPU repeated questions, Pune University PYQ, 2019 pattern Insem Endsem",
+        "author": {
+          "@type": "Person",
+          "name": "Pushkar Shinde",
+          "url": "https://pushkarez.vercel.app/"
+        }
+      }
+    </script>
+
+    <!-- Always open in White by default; preserve user's selected theme on refresh -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("reppyq-theme");
+          if (saved === "dark") {
+            document.documentElement.classList.add("dark");
+          } else {
+            document.documentElement.classList.remove("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 dark:bg-[#111318] dark:text-slate-100 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
