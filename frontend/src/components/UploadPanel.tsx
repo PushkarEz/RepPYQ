@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { AlertTriangle, FileText, Loader2, Upload, X } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { AlertTriangle, FileText, Loader2, Plus, X } from "lucide-react";
 import { PendingPaper } from "../types";
 import { detectPaperLabels } from "../api/client";
 
@@ -14,11 +14,47 @@ interface UploadPanelProps {
   isLoading: boolean;
 }
 
+const FolderDropIcon: React.FC<{ active: boolean }> = ({ active }) => (
+  <svg
+    viewBox="0 0 64 56"
+    fill="none"
+    className={`w-14 h-12 transition-transform duration-300 ${
+      active ? "scale-105 -translate-y-0.5" : "group-hover:-translate-y-0.5"
+    }`}
+    aria-hidden="true"
+  >
+    {/* Back folder tab */}
+    <path
+      d="M6 12C6 8.68629 8.68629 6 12 6H23.5C25.2 6 26.8 6.8 27.9 8.1L30.5 11.2H52C55.3137 11.2 58 13.8863 58 17.2V44C58 47.3137 55.3137 50 52 50H12C8.68629 50 6 47.3137 6 44V12Z"
+      className="fill-slate-200 dark:fill-[#2b3140]"
+    />
+    {/* Peeking PDF document */}
+    <path
+      d="M17 14C17 11.7909 18.7909 10 21 10H39L47 18V36H17V14Z"
+      className="fill-white dark:fill-[#1d212c] stroke-slate-300 dark:stroke-[#3b4254]"
+      strokeWidth="1.2"
+    />
+    <path
+      d="M39 10V16C39 17.1046 39.8954 18 41 18H47"
+      className="fill-slate-100 dark:fill-[#282d3b]"
+    />
+    {/* Front folder flap */}
+    <path
+      d="M4 22C4 19.7909 5.79086 18 8 18H56C58.2091 18 60 19.7909 60 22L57.5 45C57.15 47.85 54.73 50 51.86 50H12.14C9.27 50 6.85 47.85 6.5 45L4 22Z"
+      className="fill-slate-100/95 dark:fill-[#232836] stroke-slate-300/80 dark:stroke-[#383f50]"
+      strokeWidth="1.2"
+    />
+  </svg>
+);
+
 export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }) => {
   const [papers, setPapers] = useState<PendingPaper[]>([]);
   const [subjectName, setSubjectName] = useState("");
   const [detecting, setDetecting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [justDropped, setJustDropped] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFilesSelected = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
@@ -51,6 +87,29 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }
     }
   };
 
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    setJustDropped(true);
+    setTimeout(() => setJustDropped(false), 1200);
+    handleFilesSelected(e.dataTransfer.files);
+  };
+
   const updateLabel = (idx: number, val: string) => {
     setPapers((prev) => prev.map((p, i) => (i === idx ? { ...p, label: val } : p)));
   };
@@ -79,19 +138,21 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }
     }
   };
 
+  const showWave = isDragging || justDropped || detecting;
+
   return (
     <div className="max-w-3xl mx-auto space-y-5">
       <div>
         <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           Find Repeated Questions in SPPU Papers
         </h2>
-        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
           Drop your past SPPU exam PDFs (Insem or Endsem) from any branch. We sort every question into Unit 1&ndash;2 (Insem) or Unit 3&ndash;6 (Endsem) and show which ones repeat the most&mdash;so you know what to study first.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="bg-white dark:bg-[#181b22] border border-slate-200 dark:border-[#272b36] rounded-xl p-5 sm:p-6 space-y-5 shadow-sm">
+        <div className="bg-white dark:bg-[#181b22] border border-slate-200 dark:border-[#272b36] rounded-2xl p-4 sm:p-6 space-y-5 shadow-sm">
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
               Subject Name
@@ -100,66 +161,125 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }
               type="text"
               value={subjectName}
               onChange={(e) => setSubjectName(e.target.value)}
-              placeholder="e.g., Cloud Computing / Microwave Engineering / Embedded Systems"
-              className="w-full rounded-lg border border-slate-300 dark:border-[#323746] bg-white dark:bg-[#12151b] px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-slate-500 dark:focus:border-slate-400 transition-colors"
+              placeholder="e.g., Cloud Computing / VLSI / Microwave Engineering"
+              className="w-full rounded-xl border border-slate-300 dark:border-[#323746] bg-white dark:bg-[#12151b] px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-slate-500 dark:focus:border-slate-400 transition-colors"
               required
             />
           </div>
 
-          <label className="group flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-[#323746] rounded-xl p-7 sm:p-9 cursor-pointer hover:border-slate-500 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-[#14171e] transition-all duration-200">
-            <Upload className="w-7 h-7 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 group-hover:-translate-y-0.5 transition-all duration-200 mb-2" />
-            <span className="text-sm font-medium text-slate-800 dark:text-slate-200 text-center">
-              {detecting ? "Scanning PDF headers..." : "Click to upload SPPU Question Papers (PDF)"}
-            </span>
-            <span className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center">
-              Select 3 to 10 papers in any order &mdash; auto-sorted chronologically
-            </span>
+          {/* Drag & Drop PDF Box */}
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            className={`group relative overflow-hidden flex flex-col items-center justify-center rounded-2xl border-2 border-dashed px-4 py-8 sm:py-11 cursor-pointer transition-all duration-200 ${
+              isDragging
+                ? "border-slate-700 dark:border-slate-300 bg-slate-100/90 dark:bg-[#1d222e] scale-[1.01]"
+                : "border-slate-300 dark:border-[#323746] bg-slate-50/70 dark:bg-[#13161d] hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-100/60 dark:hover:bg-[#161a23]"
+            }`}
+          >
+            {/* Circular Wave Ripple */}
+            <div className="relative flex items-center justify-center mb-3">
+              {showWave && (
+                <>
+                  <span className="animate-drop-wave absolute w-16 h-16 rounded-full border border-slate-400/60 dark:border-slate-400/40 pointer-events-none" />
+                  <span
+                    className="animate-drop-wave absolute w-16 h-16 rounded-full border border-slate-400/40 dark:border-slate-400/25 pointer-events-none"
+                    style={{ animationDelay: "0.45s" }}
+                  />
+                </>
+              )}
+              <FolderDropIcon active={isDragging} />
+            </div>
+
+            <p className="text-sm sm:text-base font-medium text-slate-800 dark:text-slate-100 text-center">
+              {detecting
+                ? "Scanning PDF headers..."
+                : isDragging
+                ? "Drop PDFs here"
+                : "Upload PDF"}
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 text-center max-w-xs">
+              Drag &amp; drop 3 to 10 SPPU question papers here (auto-sorted chronologically)
+            </p>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                fileInputRef.current?.click();
+              }}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 px-4 py-2 text-xs font-medium shadow-sm hover:bg-slate-800 dark:hover:bg-white active:scale-[0.97] transition-all duration-150"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add files</span>
+            </button>
+
             <input
+              ref={fileInputRef}
               type="file"
               accept=".pdf,application/pdf"
               multiple
               className="hidden"
-              onChange={(e) => handleFilesSelected(e.target.files)}
+              onChange={(e) => {
+                handleFilesSelected(e.target.files);
+                e.target.value = "";
+              }}
             />
-          </label>
+          </div>
 
           {papers.length > 0 && (
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Uploaded Papers ({papers.length}) &mdash; Confirm Exam Labels
               </div>
-              <div className="divide-y divide-slate-100 dark:divide-[#272b36] border border-slate-200 dark:border-[#272b36] rounded-lg overflow-hidden">
+              <div className="divide-y divide-slate-100 dark:divide-[#272b36] border border-slate-200 dark:border-[#272b36] rounded-xl overflow-hidden">
                 {papers.map((p, idx) => (
                   <div
                     key={`${p.file.name}-${idx}`}
-                    className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 sm:gap-3 p-3 bg-white dark:bg-[#12151b]"
+                    className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-3 bg-white dark:bg-[#12151b]"
                   >
-                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
-                        {p.file.name}
-                      </p>
-                      {p.warning && (
-                        <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1 mt-0.5">
-                          <AlertTriangle className="w-3 h-3 shrink-0" /> {p.warning}
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                          {p.file.name}
                         </p>
-                      )}
+                        {p.warning && (
+                          <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1 mt-0.5">
+                            <AlertTriangle className="w-3 h-3 shrink-0" /> {p.warning}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      value={p.label}
-                      onChange={(e) => updateLabel(idx, e.target.value)}
-                      placeholder="e.g. May Jun 2024"
-                      className="w-36 sm:w-40 rounded-md border border-slate-300 dark:border-[#323746] bg-white dark:bg-[#181b22] px-2.5 py-1 text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-slate-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removePaper(idx)}
-                      className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                      title="Remove paper"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={p.label}
+                        onChange={(e) => updateLabel(idx, e.target.value)}
+                        placeholder="e.g. May Jun 2024"
+                        className="w-full sm:w-40 rounded-lg border border-slate-300 dark:border-[#323746] bg-white dark:bg-[#181b22] px-2.5 py-1.5 text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-slate-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePaper(idx)}
+                        className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors shrink-0"
+                        title="Remove paper"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -168,7 +288,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }
         </div>
 
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-sm rounded-lg px-4 py-3">
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-sm rounded-xl px-4 py-3">
             {error}
           </div>
         )}

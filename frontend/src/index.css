@@ -24,3 +24,19 @@ html.dark {
 ::view-transition-new(root) {
   z-index: 9999;
 }
+
+/* Subtle circular wave ripple for PDF drag & drop */
+@keyframes dropWave {
+  0% {
+    transform: scale(0.75);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+
+.animate-drop-wave {
+  animation: dropWave 1.3s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}

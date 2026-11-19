@@ -23,3 +23,4 @@ upgrade_ai_grouper.py
 upgrade_smart_grouping.py
 fix_all_100pct.py
 fix_groq_models.py
+upgrade_ux_final.py

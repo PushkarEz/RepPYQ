@@ -140,17 +140,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {analysis.grouping_mode ? ` · ${analysis.grouping_mode}` : ""}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={onReset}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-[#323746] text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232732] transition-colors"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-[#323746] text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#232732] transition-colors"
             >
               <RotateCcw className="w-4 h-4" /> New Upload
             </button>
             <a
               href={getExportPdfUrl(analysis.analysis_id)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs sm:text-sm font-medium hover:bg-slate-800 dark:hover:bg-white active:scale-[0.98] transition-all"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs sm:text-sm font-medium hover:bg-slate-800 dark:hover:bg-white active:scale-[0.98] transition-all"
             >
               <Download className="w-4 h-4" /> Export Unit-Wise PDF
             </a>
@@ -181,7 +181,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       )}
 
       {/* Compact Sticky Filter Controls */}
-      <div className="bg-white dark:bg-[#181b22] border border-slate-200 dark:border-[#272b36] rounded-xl p-4 space-y-3 sm:sticky sm:top-2 z-10 shadow-sm">
+      <div className="bg-white dark:bg-[#181b22] border border-slate-200 dark:border-[#272b36] rounded-xl p-4 space-y-3 md:sticky md:top-2 z-10 shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-5 items-center">
           <div>
             <div className="flex justify-between text-xs sm:text-sm mb-1">

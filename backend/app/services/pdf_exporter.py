@@ -270,7 +270,7 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
 
             topic_p = Paragraph(f"{idx}. {escape(cl.topic_title)}", topic_style)
             badge_p = Paragraph(
-                f"{tag}   ·   Appeared in {cl.unique_paper_count} of {cl.total_papers} papers",
+                f"{tag}   ·   Asked {cl.total_occurrences} time{'s' if cl.total_occurrences != 1 else ''} across {cl.unique_paper_count} of {cl.total_papers} papers",
                 b_style,
             )
 

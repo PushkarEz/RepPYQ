@@ -31,6 +31,7 @@ export const ClusterCard: React.FC<ClusterCardProps> = ({
   onSplitQuestion,
 }) => {
   const presentPaperIds = new Set(cluster.questions.map((q) => q.paper_id));
+  const timesLabel = cluster.total_occurrences === 1 ? "time" : "times";
 
   return (
     <div
@@ -59,7 +60,8 @@ export const ClusterCard: React.FC<ClusterCardProps> = ({
             </h3>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
-                {cluster.unique_paper_count} / {cluster.total_papers} papers
+                {cluster.unique_paper_count} / {cluster.total_papers} papers &middot;{" "}
+                {cluster.total_occurrences} {timesLabel}
               </span>
               <span
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-medium border ${
@@ -91,7 +93,6 @@ export const ClusterCard: React.FC<ClusterCardProps> = ({
 
       {expanded && (
         <div className="px-3.5 sm:px-4 pb-4 space-y-2.5 border-t border-slate-100 dark:border-[#272b36] pt-3">
-          {/* Exam Paper Coverage Strip */}
           {allPapers.length > 1 && cluster.unique_paper_count >= 2 && (
             <div className="flex flex-wrap gap-1.5 pb-1">
               {allPapers.map((p) => {
@@ -130,7 +131,7 @@ export const ClusterCard: React.FC<ClusterCardProps> = ({
                   type="button"
                   onClick={() => onSplitQuestion(cluster.cluster_id, q.id)}
                   title="Split this question into its own cluster"
-                  className="sm:opacity-0 sm:group-hover:opacity-100 shrink-0 p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all"
+                  className="opacity-70 sm:opacity-0 sm:group-hover:opacity-100 shrink-0 p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all"
                 >
                   <Unlink className="w-3.5 h-3.5" />
                 </button>
