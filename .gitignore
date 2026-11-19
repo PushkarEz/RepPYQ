@@ -20,3 +20,4 @@ prep_free_deploy.py
 fix_vercel.py
 upgrade_pdf_design.py
 upgrade_ai_grouper.py
+upgrade_smart_grouping.py

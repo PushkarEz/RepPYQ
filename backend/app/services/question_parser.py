@@ -16,15 +16,14 @@ SUB_Q_RE = re.compile(
 
 OR_LINE_RE = re.compile(r"^\s*(?:OR|O\.?R\.?|O\s+R)\s*$", re.IGNORECASE)
 
-# Also catches up to 2 stray diagram single-letters after marks like "[6] L"
 MARKS_END_RE = re.compile(
     r"(?:\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\]|\(\s*(\d{1,2})\s*(?:M|Marks?)?\s*\)|[-–]\s*(\d{1,2})\s*Marks?)(?:\s+[A-Z]{1,2})?\s*$",
     re.IGNORECASE,
 )
 
-MARKS_BEFORE_ROMAN_RE = re.compile(
-    r"\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\](?=\s+(?:i|ii|1)\s*[\)\.])",
-    re.IGNORECASE,
+# Catches marks inline before sub-items or mid-question: "Draw block diagram of CPLD. [9] Explain..."
+MARKS_INLINE_RE = re.compile(
+    r"\s*\[\s*(\d{1,2})\s*(?:M|Marks?)?\s*\]\s*(?=(?:i|ii|1)\s*[\)\.]|[A-Z])",
 )
 
 INSTRUCTION_PREFIXES = (
@@ -64,13 +63,16 @@ def _extract_marks(text: str) -> Tuple[str, Optional[int]]:
         raw_num = m.group(1) or m.group(2) or m.group(3)
         val = int(raw_num)
         if val <= 30:
-            return s[: m.start()].strip(), val
+            cleaned = s[: m.start()].strip()
+            # Also strip any second inline [9] if marks appeared twice
+            cleaned = MARKS_INLINE_RE.sub(" ", cleaned)
+            return cleaned, val
 
-    m2 = MARKS_BEFORE_ROMAN_RE.search(s)
+    m2 = MARKS_INLINE_RE.search(s)
     if m2:
         val = int(m2.group(1))
         if val <= 30:
-            cleaned = (s[: m2.start()] + ":" + s[m2.end():]).strip()
+            cleaned = (s[: m2.start()] + " " + s[m2.end():]).strip()
             return cleaned, val
 
     return s, None

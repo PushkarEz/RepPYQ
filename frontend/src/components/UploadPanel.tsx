@@ -71,7 +71,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ onAnalyze, isLoading }
         files: papers.map((p) => p.file),
         labels: papers.map((p) => p.label.trim() || p.file.name),
         subjectName: subjectName.trim() || "SPPU Subject Revision Notes",
-        threshold: 0.72,
+        threshold: 0.56,
         syllabusText: "",
       });
     } catch (err: unknown) {

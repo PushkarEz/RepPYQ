@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple
 import httpx
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.feature_extraction.text import HashingVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from app.models.schemas import ExtractedQuestion, PriorityTier
 
@@ -25,16 +25,59 @@ _MODEL_INSTANCE = None
 STOPWORDS = {
     "what", "is", "are", "the", "a", "an", "in", "of", "and", "or", "for", "to",
     "with", "explain", "discuss", "describe", "define", "state", "draw", "write",
-    "note", "short", "detail", "neat", "diagram", "suitable", "example", "examples",
-    "compare", "differentiate", "between", "types", "different", "need", "enlist",
-    "advantages", "disadvantages", "applications", "various", "its", "how", "why",
-    "role", "steps", "involved", "fundamental", "components", "characteristics",
+    "note", "notes", "short", "detail", "details", "brief", "neat", "diagram",
+    "suitable", "example", "examples", "types", "different", "need", "enlist",
+    "various", "its", "how", "why", "role", "steps", "involved", "fundamental",
+    "components", "characteristics", "following", "respect", "points", "give",
+    "list", "typical", "between", "basis",
 }
 
 MONTH_MAP = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
+
+
+def normalize_for_matching(text: str) -> str:
+    """
+    Normalizes exam command fluff & synonyms ONLY for similarity calculation.
+    NEVER touches q.exact_text (which stays 100% verbatim).
+    """
+    s = text.lower().strip()
+
+    # Map comparison synonyms to one canonical intent token
+    s = re.sub(
+        r"\b(?:compare\s+and\s+contrast|compare|distinguish\s+between|distinguish|"
+        r"differentiate\s+between|differentiate|difference\s+between|differences\s+between|"
+        r"contrast)\b",
+        " _cmp_ ",
+        s,
+    )
+    # Map architecture / diagram synonyms
+    s = re.sub(
+        r"\b(?:block\s+diagram|internal\s+architecture|architecture|constructional\s+diagram|"
+        r"construction\s+and\s+working|construction)\b",
+        " _arch_ ",
+        s,
+    )
+
+    # Strip boilerplate command phrases that hide the real concept
+    filler_patterns = [
+        r"\bon\s+the\s+basis\s+of\s+features[,\s]+specifications\s+and\s+applications\b",
+        r"\bwith\s+respect\s+to\s+the\s+following\s+points\b",
+        r"\bwith\s+respect\s+to\b",
+        r"\bwith\s+(?:a\s+)?(?:neat|suitable|labelled)?\s*diagram\b",
+        r"\bwrite\s+(?:a\s+)?short\s+notes?\s+on\b",
+        r"\b(?:draw\s+and\s+explain|list\s+and\s+explain|state\s+and\s+explain|identify\s+and\s+elaborate)\b",
+        r"\b(?:explain|discuss|describe|define|draw|write|list|enlist|give|state|what\s+are|what\s+is)\b",
+        r"\b(?:in\s+detail|in\s+brief|briefly|various|the\s+following|any\s+two\s+of\s+it)\b",
+    ]
+    for pat in filler_patterns:
+        s = re.sub(pat, " ", s)
+
+    s = re.sub(r"[^a-z0-9_\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s or text.lower()
 
 
 def chronological_paper_key(paper_name: str, question_number: str = "") -> tuple:
@@ -84,16 +127,17 @@ def _encode_via_hf_api(texts: List[str], token: str) -> np.ndarray | None:
     return None
 
 
-def _encode_lightweight_hybrid(texts: List[str]) -> np.ndarray:
-    word_vec = HashingVectorizer(
-        n_features=768, ngram_range=(1, 2), stop_words="english", alternate_sign=False
+def _encode_tfidf_hybrid(texts: List[str]) -> np.ndarray:
+    """High-precision TF-IDF word + char_wb hybrid for 512MB cloud tier."""
+    word_vec = TfidfVectorizer(
+        ngram_range=(1, 2), sublinear_tf=True, stop_words="english"
     )
-    char_vec = HashingVectorizer(
-        n_features=512, analyzer="char_wb", ngram_range=(3, 5), alternate_sign=False
+    char_vec = TfidfVectorizer(
+        analyzer="char_wb", ngram_range=(3, 5), sublinear_tf=True
     )
-    w_mat = word_vec.transform(texts).toarray().astype(np.float32)
-    c_mat = char_vec.transform(texts).toarray().astype(np.float32)
-    combined = np.hstack([w_mat * 1.25, c_mat * 0.75])
+    w_mat = word_vec.fit_transform(texts).toarray().astype(np.float32)
+    c_mat = char_vec.fit_transform(texts).toarray().astype(np.float32)
+    combined = np.hstack([w_mat * 1.4, c_mat * 0.6])
     return _l2_normalize(combined)
 
 
@@ -108,25 +152,30 @@ def encode_texts(texts: List[str]) -> np.ndarray:
     if not texts:
         return np.zeros((0, 384), dtype=np.float32)
 
+    normed = [normalize_for_matching(t) for t in texts]
+
     hf_token = os.getenv("HF_TOKEN", "").strip()
     if hf_token:
-        hf_embs = _encode_via_hf_api(texts, hf_token)
+        hf_embs = _encode_via_hf_api(normed, hf_token)
         if hf_embs is not None:
             return hf_embs
 
     if SentenceTransformer is not None:
         model = get_embedding_model()
         embeddings = model.encode(
-            texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
+            normed, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False
         )
         return embeddings.astype(np.float32)
 
-    return _encode_lightweight_hybrid(texts)
+    return _encode_tfidf_hybrid(normed)
 
 
 def _tech_tokens(text: str) -> Set[str]:
-    tokens = set(re.findall(r"[a-z0-9]{2,}", text.lower()))
-    return tokens - STOPWORDS
+    normed = normalize_for_matching(text)
+    tokens = set(re.findall(r"[a-z0-9_]{2,}", normed))
+    # Simple plural stem trim ('tools' -> 'tool', 'applications' -> 'application')
+    stemmed = {t[:-1] if len(t) > 4 and t.endswith("s") else t for t in tokens}
+    return stemmed - STOPWORDS
 
 
 def compute_priority_tier(unique_papers: int, total_papers: int) -> PriorityTier:
@@ -177,7 +226,6 @@ def cluster_questions(
 
     for i in range(n):
         for j in range(i + 1, n):
-            # Keep distinct SPPU units separate, but allow same-concept questions in same paper to group
             ui, uj = questions[i].unit_number, questions[j].unit_number
             if ui and uj and ui != uj:
                 dist_matrix[i, j] = dist_matrix[j, i] = 2.0
@@ -186,7 +234,7 @@ def cluster_questions(
             ti, tj = token_sets[i], token_sets[j]
             union = ti | tj
             jacc = (len(ti & tj) / len(union)) if union else 0.0
-            hybrid_sim = 0.84 * float(sim_matrix[i, j]) + 0.16 * jacc
+            hybrid_sim = 0.72 * float(sim_matrix[i, j]) + 0.28 * jacc
             dist = float(np.clip(1.0 - hybrid_sim, 0.0, 2.0))
             dist_matrix[i, j] = dist_matrix[j, i] = dist
 

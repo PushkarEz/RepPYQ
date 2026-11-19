@@ -214,7 +214,7 @@ async def analyze_pdfs(
     files: List[UploadFile] = File(...),
     paper_labels_json: str = Form("[]"),
     subject_name: str = Form("Subject Revision Notes"),
-    similarity_threshold: float = Form(0.68),
+    similarity_threshold: float = Form(0.56),
     syllabus_text: str = Form(""),
 ):
     if not files:

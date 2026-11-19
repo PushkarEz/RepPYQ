@@ -6,7 +6,11 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 
 from app.models.schemas import ExtractedQuestion
-from app.services.clustering import chronological_paper_key
+from app.services.clustering import (
+    chronological_paper_key,
+    cluster_questions,
+    encode_texts,
+)
 from app.services.labeling import heuristic_topic_title
 
 
@@ -16,27 +20,22 @@ def _call_groq_group_unit(
     unit_questions: List[ExtractedQuestion],
     api_key: str,
 ) -> Optional[List[Tuple[str, List[int]]]]:
-    """
-    Sends ONLY numeric indices + question text for ONE unit to Groq.
-    Returns list of (topic_title, [local_indices]) or None on failure.
-    Never modifies or returns question text.
-    """
     numbered_lines = "\n".join(
         f"{idx}: {q.exact_text}" for idx, q in enumerate(unit_questions)
     )
 
     prompt = (
         f"You are organizing SPPU university exam questions for '{subject_name}' ({unit_name}) "
-        "into clean, practical revision topics.\n"
-        "Rules:\n"
-        "1. Group questions that test the SAME core syllabus concept together "
-        "(e.g., 'CMOS Inverter, VTC & Noise Margin' or 'Dynamic & Static Power Dissipation'), "
-        "even if one asks for a derivation, diagram, numerical, or short note on that concept.\n"
-        "2. Keep genuinely distinct syllabus concepts separate.\n"
-        "3. Aim for concise, clean study buckets (typically 5 to 12 topics per unit when concepts repeat).\n"
-        "4. Use ONLY the exact integer IDs given below. Every ID from 0 to "
-        f"{len(unit_questions) - 1} must appear exactly once.\n"
-        "5. Topic titles must be short, plain English (3 to 7 words, no quotes, no colons).\n"
+        "into clean, accurate revision groups.\n"
+        "Strict Grouping Rules:\n"
+        "1. Treat exam command synonyms as IDENTICAL intent: "
+        "'Compare A and B' == 'Distinguish between A and B' == 'Difference between A and B' -> keep all of those together!\n"
+        "2. Similarly, 'Draw block diagram of X' == 'Draw and explain architecture of X' -> group together.\n"
+        "3. 'Explain in brief PLD design flow' == 'Draw and explain PLD design flow' -> group together.\n"
+        "4. Do NOT merge distinct topics (e.g. keep 'FPGA vs CPLD Comparison' separate from 'FPGA Architecture/CLB', and separate from 'CPLD Architecture/Macrocell').\n"
+        "5. Use ONLY the exact integer IDs given below. Include EVERY ID from 0 to "
+        f"{len(unit_questions) - 1} exactly once.\n"
+        "6. Give each group a crisp 3 to 6 word plain-English title (e.g. 'FPGA vs CPLD Comparison', 'PLD Design Flow').\n"
         'Return ONLY valid JSON: {"topics": [{"title": "...", "ids": [0, 3]}]}\n\n'
         f"Questions:\n{numbered_lines}"
     )
@@ -56,9 +55,9 @@ def _call_groq_group_unit(
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                     "response_format": {"type": "json_object"},
-                    "max_tokens": 2000,
+                    "max_tokens": 3000,
                 },
-                timeout=25.0,
+                timeout=30.0,
             )
             if resp.status_code != 200:
                 continue
@@ -95,12 +94,8 @@ def _call_groq_group_unit(
 def group_questions_with_ai(
     subject_name: str,
     questions: List[ExtractedQuestion],
+    fallback_threshold: float = 0.56,
 ) -> Optional[List[Tuple[str, str, List[ExtractedQuestion], float]]]:
-    """
-    Runs ID-only AI Concept Grouping unit by unit.
-    Returns list of (cluster_id, topic_title, verbatim_questions, confidence)
-    or None if GROQ_API_KEY is not configured / fails completely.
-    """
     api_key = os.getenv("GROQ_API_KEY", "").strip()
     if not api_key or not questions:
         return None
@@ -110,7 +105,7 @@ def group_questions_with_ai(
         by_unit[q.unit_number or "General"].append(q)
 
     all_clusters: List[Tuple[str, str, List[ExtractedQuestion], float]] = []
-    any_ai_success = False
+    ai_units_succeeded = 0
 
     for unit_name, unit_qs in by_unit.items():
         if len(unit_qs) == 1:
@@ -122,10 +117,13 @@ def group_questions_with_ai(
 
         grouped = _call_groq_group_unit(subject_name, unit_name, unit_qs, api_key)
         if not grouped:
-            # Skip AI for this unit; caller falls back if needed
-            return None
+            # Fallback ONLY for this unit instead of throwing away other successful units
+            unit_embs = encode_texts([q.exact_text for q in unit_qs])
+            for cid, m_qs, avg_sim in cluster_questions(unit_qs, unit_embs, fallback_threshold):
+                all_clusters.append((cid, heuristic_topic_title(m_qs), m_qs, avg_sim))
+            continue
 
-        any_ai_success = True
+        ai_units_succeeded += 1
         seen_local_ids = set()
 
         for title, local_ids in grouped:
@@ -142,14 +140,13 @@ def group_questions_with_ai(
             clean_title = title.strip('"\'.') if title else heuristic_topic_title(member_qs)
             all_clusters.append((str(uuid.uuid4()), clean_title, member_qs, 0.92))
 
-        # Safety net: preserve any question ID missed by the LLM without losing anything
         for idx, q in enumerate(unit_qs):
             if idx not in seen_local_ids:
                 all_clusters.append(
                     (str(uuid.uuid4()), heuristic_topic_title([q]), [q], 1.0)
                 )
 
-    if not any_ai_success:
+    if ai_units_succeeded == 0:
         return None
 
     all_clusters.sort(
