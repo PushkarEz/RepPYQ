@@ -17,3 +17,4 @@ fix_upload_text.py
 generate_test_pdfs.py
 prep_deploy.py
 prep_free_deploy.py
+fix_vercel.py

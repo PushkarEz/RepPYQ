@@ -139,6 +139,11 @@ def _to_response(session: AnalysisSession) -> AnalysisResponse:
     )
 
 
+@app.get("/")
+def root():
+    return {"app": "RepPYQ API", "status": "running"}
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
