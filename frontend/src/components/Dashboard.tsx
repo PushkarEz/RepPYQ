@@ -318,6 +318,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <ClusterCard
             key={cluster.cluster_id}
             cluster={cluster}
+            allPapers={analysis.papers}
             expanded={!!expandedIds[cluster.cluster_id]}
             selectedForMerge={selectedIds.includes(cluster.cluster_id)}
             onToggleExpand={toggleExpand}

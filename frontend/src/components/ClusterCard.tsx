@@ -1,9 +1,10 @@
 import React from "react";
-import { ChevronDown, ChevronRight, Unlink } from "lucide-react";
-import { QuestionCluster } from "../types";
+import { Check, ChevronDown, ChevronRight, Minus, Unlink } from "lucide-react";
+import { PaperInfo, QuestionCluster } from "../types";
 
 interface ClusterCardProps {
   cluster: QuestionCluster;
+  allPapers: PaperInfo[];
   expanded: boolean;
   selectedForMerge: boolean;
   onToggleExpand: (clusterId: string) => void;
@@ -22,12 +23,15 @@ const PRIORITY_STYLES: Record<string, string> = {
 
 export const ClusterCard: React.FC<ClusterCardProps> = ({
   cluster,
+  allPapers,
   expanded,
   selectedForMerge,
   onToggleExpand,
   onToggleSelect,
   onSplitQuestion,
 }) => {
+  const presentPaperIds = new Set(cluster.questions.map((q) => q.paper_id));
+
   return (
     <div
       className={`bg-white dark:bg-[#181b22] border rounded-xl transition-all duration-200 ${
@@ -86,7 +90,29 @@ export const ClusterCard: React.FC<ClusterCardProps> = ({
       </div>
 
       {expanded && (
-        <div className="px-3.5 sm:px-4 pb-4 space-y-2 border-t border-slate-100 dark:border-[#272b36] pt-3">
+        <div className="px-3.5 sm:px-4 pb-4 space-y-2.5 border-t border-slate-100 dark:border-[#272b36] pt-3">
+          {/* Exam Paper Coverage Strip */}
+          {allPapers.length > 1 && cluster.unique_paper_count >= 2 && (
+            <div className="flex flex-wrap gap-1.5 pb-1">
+              {allPapers.map((p) => {
+                const asked = presentPaperIds.has(p.paper_id);
+                return (
+                  <span
+                    key={p.paper_id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border ${
+                      asked
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/25"
+                        : "bg-slate-50 text-slate-400 border-slate-200 dark:bg-[#12151b] dark:text-slate-500 dark:border-[#232732]"
+                    }`}
+                  >
+                    {asked ? <Check className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                    {p.paper_name}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
           {cluster.questions.map((q) => (
             <div
               key={q.id}

@@ -34,7 +34,7 @@ from app.services.question_parser import parse_questions
 
 load_dotenv()
 
-app = FastAPI(title="RepPYQ API", version="2.0.0")
+app = FastAPI(title="RepPYQ API", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -106,9 +106,13 @@ def _build_cluster_objects(
     cluster_objs: List[QuestionCluster] = []
 
     if use_ai:
-        ai_grouped = group_questions_with_ai(session.subject_name, session.questions)
+        ai_grouped, ai_err = group_questions_with_ai(
+            session.subject_name, session.questions, session.similarity_threshold
+        )
         if ai_grouped is not None:
             session.grouping_mode = "AI Concept Grouping"
+            if ai_err:
+                session.warnings.append(f"Partial AI fallback: {ai_err}")
             for cid, title, q_list, conf in ai_grouped:
                 unique_papers = len({q.paper_id for q in q_list})
                 unit_lbl = _resolve_cluster_unit(
@@ -128,6 +132,8 @@ def _build_cluster_objects(
                     )
                 )
             return cluster_objs
+        elif ai_err:
+            session.warnings.append(f"AI note: {ai_err} (used fallback matching).")
 
     session.grouping_mode = "Semantic Similarity"
     raw_clusters = cluster_questions(

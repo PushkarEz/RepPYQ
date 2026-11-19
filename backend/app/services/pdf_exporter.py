@@ -114,15 +114,19 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
     )
     rep_high_style = ParagraphStyle(
         "RepHigh", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=8.5, leading=11, textColor=high_col, spaceAfter=6,
+        fontSize=8.5, leading=11, textColor=high_col, spaceAfter=2,
     )
     rep_med_style = ParagraphStyle(
         "RepMed", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=8.5, leading=11, textColor=med_col, spaceAfter=6,
+        fontSize=8.5, leading=11, textColor=med_col, spaceAfter=2,
     )
     rep_low_style = ParagraphStyle(
         "RepLow", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=8.5, leading=11, textColor=muted, spaceAfter=6,
+        fontSize=8.5, leading=11, textColor=muted, spaceAfter=2,
+    )
+    cov_style = ParagraphStyle(
+        "CovStrip", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=7.8, leading=11, textColor=muted, spaceAfter=6,
     )
     q_meta_style = ParagraphStyle(
         "QMeta", parent=styles["Normal"], fontName="Helvetica-Bold",
@@ -143,7 +147,6 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
 
     story = []
 
-    # --- PAGE 1: CLEAN STUDY OVERVIEW ---
     sorted_papers = sorted(analysis.papers, key=lambda p: chronological_paper_key(p.paper_name))
     story.append(Paragraph(escape(analysis.subject_name), title_style))
     paper_list = "  ·  ".join(f"{p.paper_name} ({p.exam_type})" for p in sorted_papers)
@@ -215,7 +218,6 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
         )
         story.append(chk_table)
 
-    # --- UNIT BY UNIT CHAPTERS ---
     for unit_name in sorted_units:
         story.append(PageBreak())
 
@@ -227,7 +229,6 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
         rep_clusters = [c for c in unit_clusters if c.unique_paper_count >= 2]
         once_clusters = [c for c in unit_clusters if c.unique_paper_count < 2]
 
-        # If a unit only has single-paper clusters (e.g. 1 paper uploaded), show them as main
         main_clusters = rep_clusters if rep_clusters else once_clusters
         bonus_clusters = once_clusters if rep_clusters else []
 
@@ -273,6 +274,15 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
                 b_style,
             )
 
+            present_ids = {q.paper_id for q in cl.questions}
+            cov_parts = [
+                f"<b><font color='#0F172A'>[+] {escape(p.paper_name)}</font></b>"
+                if p.paper_id in present_ids
+                else f"<font color='#94A3B8'>[-] {escape(p.paper_name)}</font>"
+                for p in sorted_papers
+            ]
+            cov_p = Paragraph("Coverage: " + "  ·  ".join(cov_parts), cov_style)
+
             ordered_qs = sorted(
                 cl.questions,
                 key=lambda q: chronological_paper_key(q.paper_name, q.question_number),
@@ -303,7 +313,7 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
                 )
                 q_cards.append(card)
 
-            first_group = [topic_p, badge_p]
+            first_group = [topic_p, badge_p, cov_p]
             if q_cards:
                 first_group.append(q_cards[0])
             story.append(KeepTogether(first_group))
@@ -314,7 +324,6 @@ def build_revision_pdf(analysis: AnalysisResponse) -> bytes:
 
             story.append(Spacer(1, 14))
 
-        # Compact "Asked Only Once" Appendix at end of Unit
         if bonus_clusters:
             story.append(HRFlowable(width="100%", thickness=0.6, color=border_soft, spaceAfter=6))
             story.append(

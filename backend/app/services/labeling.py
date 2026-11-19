@@ -8,13 +8,18 @@ from app.models.schemas import ExtractedQuestion
 from app.services.clustering import encode_texts
 
 
+COMPARE_RE = re.compile(
+    r"^(?:compare(?:\s+and\s+contrast)?|distinguish\s+between|differentiate\s+between|"
+    r"difference\s+between|contrast)\s+(.+)$",
+    re.IGNORECASE,
+)
+
 COMMAND_PREFIX_RE = re.compile(
     r"^(?:"
     r"explain\s+in\s+detail|explain|discuss\s+in\s+detail|discuss|"
     r"describe|define|state\s+and\s+explain|state|draw\s+and\s+explain|"
     r"draw\s+neat\s+diagram\s+(?:of|for)|draw|write\s+a?\s*short\s+notes?\s+on|"
-    r"write\s+note\s+on|compare\s+and\s+contrast|compare|differentiate\s+between|"
-    r"distinguish\s+between|what\s+is\s+meant\s+by|what\s+is|what\s+are|"
+    r"write\s+note\s+on|what\s+is\s+meant\s+by|what\s+is|what\s+are|"
     r"enlist|list\s+and\s+explain|list|derive\s+an\s+expression\s+for|derive|"
     r"prove\s+that|show\s+that|enumerate|illustrate|with\s+neat\s+diagram|"
     r"calculate\s+the|calculate|determine\s+the|determine|find\s+the|find"
@@ -24,7 +29,7 @@ COMMAND_PREFIX_RE = re.compile(
 
 TRAILING_FLUFF_RE = re.compile(
     r"\b(?:with\s+(?:a\s+)?neat\s+(?:labelled\s+)?diagram|with\s+suitable\s+example|"
-    r"in\s+detail|briefly|giving\s+examples|with\s+diagram)\b.*$",
+    r"on\s+the\s+basis\s+of\s+features.*|in\s+detail|in\s+brief|briefly|giving\s+examples|with\s+diagram)\b.*$",
     re.IGNORECASE,
 )
 
@@ -35,8 +40,21 @@ DANGLING_TAIL_WORDS = {
 
 def heuristic_topic_title(questions: List[ExtractedQuestion]) -> str:
     shortest = min(questions, key=lambda q: len(q.exact_text)).exact_text
-    is_numerical = bool(re.search(r"\b(?:calculate|determine|find|mhz|ghz|kw|mw|db|vswr|ohm)\b", shortest, re.I))
     text = shortest.strip().rstrip(".?:;")
+
+    # Keep comparison intent clear ("Compare FPGA and CPLD" -> "FPGA vs CPLD Comparison")
+    cmp_m = COMPARE_RE.match(text)
+    if cmp_m:
+        body = TRAILING_FLUFF_RE.sub("", cmp_m.group(1)).strip(" ,.;:-")
+        parts = re.split(r"\s+(?:and|with|vs\.?|versus)\s+", body, maxsplit=1, flags=re.I)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            a = parts[0].strip(" ,.;:-")
+            b = parts[1].strip(" ,.;:-")
+            if len(a) <= 28 and len(b) <= 28:
+                return f"{a} vs {b} Comparison"
+        return f"Compare {body[:52]}"
+
+    is_numerical = bool(re.search(r"\b(?:calculate|determine|find|mhz|ghz|kw|mw|db|vswr|ohm)\b", shortest, re.I))
 
     for _ in range(3):
         updated = COMMAND_PREFIX_RE.sub("", text).strip()
@@ -86,53 +104,4 @@ def match_syllabus_unit(
 
 
 def generate_cluster_title(questions: List[ExtractedQuestion]) -> str:
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    ollama_url = os.getenv("OLLAMA_URL", "").strip()
-
-    if not groq_key and not ollama_url:
-        return heuristic_topic_title(questions)
-
-    sample_qs = "\n".join(f"- {q.exact_text}" for q in questions[:4])
-    prompt = (
-        "Give a crisp, plain-English 3 to 7 word exam topic title for these university "
-        "exam questions. No filler words, no quotes, no colon, no AI phrasing.\n"
-        f"Questions:\n{sample_qs}\n\nTopic Title:"
-    )
-
-    if groq_key:
-        try:
-            model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-            resp = httpx.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 25,
-                },
-                timeout=8.0,
-            )
-            if resp.status_code == 200:
-                title = resp.json()["choices"][0]["message"]["content"].strip().strip('"\'.')
-                if 3 <= len(title) <= 75:
-                    return title
-        except Exception:
-            pass
-
-    if ollama_url:
-        try:
-            model = os.getenv("OLLAMA_MODEL", "llama3.2")
-            resp = httpx.post(
-                f"{ollama_url.rstrip('/')}/api/generate",
-                json={"model": model, "prompt": prompt, "stream": False},
-                timeout=8.0,
-            )
-            if resp.status_code == 200:
-                title = resp.json().get("response", "").strip().strip('"\'.')
-                if 3 <= len(title) <= 75:
-                    return title
-        except Exception:
-            pass
-
     return heuristic_topic_title(questions)
