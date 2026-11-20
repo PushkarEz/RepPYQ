@@ -26,3 +26,4 @@ fix_groq_models.py
 upgrade_ux_final.py
 convert_to_vercel.py
 fix_vercel_size.py
+fix_now.py

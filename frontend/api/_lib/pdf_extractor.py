@@ -82,10 +82,6 @@ def detect_exam_type(raw_text: str, filename: str = "") -> str:
 
 
 def _extract_page_horizontal_lines(page_layout) -> str:
-    """
-    Walks pdfminer layout, drops diagonal/rotated watermarks via char matrix,
-    and regroups spans by visual Y so right-margin [6] marks stay on the right line.
-    """
     spans: List[Tuple[float, float, str]] = []
 
     def walk(obj):
@@ -123,7 +119,6 @@ def _extract_page_horizontal_lines(page_layout) -> str:
     if not spans:
         return ""
 
-    # PDF Y increases bottom-to-top -> sort descending Y (top-to-bottom), then left-to-right
     spans.sort(key=lambda s: (-s[1], s[0]))
     grouped_lines: List[List[Tuple[float, float, str]]] = []
     line_y: List[float] = []
@@ -170,7 +165,7 @@ def extract_pdf_text(pdf_bytes: bytes, filename: str = "") -> ExtractedPDFResult
     raw_first_page = ""
     ocr_warning: Optional[str] = None
 
-    for idx, page_layout in enumerate(extract_pages(io.BytesIO(pdf_bytes), laparams=laparams)):
+    for idx, page_layout in enumerate(extract_pages(io.BytesIO(pdf_bytes), password="", laparams=laparams)):
         page_count += 1
         text = _extract_page_horizontal_lines(page_layout)
         if idx == 0:
