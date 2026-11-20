@@ -1,7 +1,9 @@
+import io
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-import fitz  # PyMuPDF
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LAParams, LTAnno, LTChar, LTTextLine
 
 
 NOISE_LINE_PATTERNS = [
@@ -79,32 +81,50 @@ def detect_exam_type(raw_text: str, filename: str = "") -> str:
     return "Endsem"
 
 
-def _extract_horizontal_visual_lines(page: fitz.Page) -> str:
-    data = page.get_text("dict")
+def _extract_page_horizontal_lines(page_layout) -> str:
+    """
+    Walks pdfminer layout, drops diagonal/rotated watermarks via char matrix,
+    and regroups spans by visual Y so right-margin [6] marks stay on the right line.
+    """
     spans: List[Tuple[float, float, str]] = []
 
-    for block in data.get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            dx, dy = line.get("dir", (1.0, 0.0))
-            if abs(dx) < 0.92 or abs(dy) > 0.15:
-                continue
-            for span in line.get("spans", []):
-                txt = span.get("text", "").strip()
-                if not txt:
-                    continue
-                txt = re.sub(r"[\uf000-\uf8ff]+", "", txt).strip()
-                if not txt:
-                    continue
-                x0, y0, x1, y1 = span["bbox"]
-                y_mid = (y0 + y1) / 2.0
-                spans.append((x0, y_mid, txt))
+    def walk(obj):
+        if isinstance(obj, LTTextLine):
+            chars = []
+            x0 = None
+            y_sum = 0.0
+            y_cnt = 0
+            for child in obj:
+                if isinstance(child, LTChar):
+                    m = child.matrix
+                    if abs(m[1]) > 0.15 or abs(m[2]) > 0.15 or m[0] <= 0:
+                        continue
+                    ch = re.sub(r"[\uf000-\uf8ff]+", "", child.get_text())
+                    if not ch:
+                        continue
+                    if x0 is None:
+                        x0 = child.x0
+                    y_sum += (child.y0 + child.y1) / 2.0
+                    y_cnt += 1
+                    chars.append(ch)
+                elif isinstance(child, LTAnno):
+                    if chars and child.get_text() in (" ", "\t"):
+                        chars.append(" ")
+            text = "".join(chars).strip()
+            if text and x0 is not None and y_cnt > 0:
+                spans.append((x0, y_sum / y_cnt, text))
+            return
 
+        if hasattr(obj, "__iter__"):
+            for child in obj:
+                walk(child)
+
+    walk(page_layout)
     if not spans:
         return ""
 
-    spans.sort(key=lambda s: (s[1], s[0]))
+    # PDF Y increases bottom-to-top -> sort descending Y (top-to-bottom), then left-to-right
+    spans.sort(key=lambda s: (-s[1], s[0]))
     grouped_lines: List[List[Tuple[float, float, str]]] = []
     line_y: List[float] = []
 
@@ -143,30 +163,25 @@ def _strip_noise_lines(text: str) -> str:
 
 
 def extract_pdf_text(pdf_bytes: bytes, filename: str = "") -> ExtractedPDFResult:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    page_count = len(doc)
+    laparams = LAParams(char_margin=2.0, line_margin=0.5, word_margin=0.1)
+    page_count = 0
     raw_pages: List[str] = []
     pages_text: List[str] = []
     raw_first_page = ""
     ocr_warning: Optional[str] = None
 
-    for idx, page in enumerate(doc):
-        text = _extract_horizontal_visual_lines(page)
-        if len(text.strip()) < 30:
-            text = page.get_text("text", sort=True) or ""
-
+    for idx, page_layout in enumerate(extract_pages(io.BytesIO(pdf_bytes), laparams=laparams)):
+        page_count += 1
+        text = _extract_page_horizontal_lines(page_layout)
         if idx == 0:
             raw_first_page = text
-
         if len(text.strip()) < 40:
             ocr_warning = (
                 f"Page {idx + 1} appears to be a scanned image (no selectable text layer)."
             )
-
         raw_pages.append(text)
         pages_text.append(_strip_noise_lines(text))
 
-    doc.close()
     raw_combined = "\n".join(raw_pages)
     combined = "\n".join(pages_text)
     exam_type = detect_exam_type(raw_combined, filename)
