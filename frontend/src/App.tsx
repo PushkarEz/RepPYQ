@@ -4,6 +4,7 @@ import { Clock, ExternalLink, Eye, FolderOpen, Moon, Sun } from "lucide-react";
 import { AnalysisResponse } from "./types";
 import {
   analyzePdfs,
+  downloadRevisionPdf,
   mergeClusters,
   reclusterAnalysis,
   recordPageVisit,
@@ -35,7 +36,6 @@ export function App() {
   const [istTime, setIstTime] = useState<string>(() => formatISTTime(new Date()));
   const visitedOnce = useRef(false);
 
-  // Main theme is ALWAYS White on fresh open; preserves dark/light choice across refresh
   const [dark, setDark] = useState(() => {
     try {
       return localStorage.getItem("reppyq-theme") === "dark";
@@ -135,7 +135,7 @@ export function App() {
     if (!analysis) return;
     setBusy(true);
     try {
-      setAnalysis(await reclusterAnalysis(analysis.analysis_id, threshold));
+      setAnalysis(await reclusterAnalysis(analysis, threshold));
     } finally {
       setBusy(false);
     }
@@ -145,7 +145,7 @@ export function App() {
     if (!analysis) return;
     setBusy(true);
     try {
-      setAnalysis(await mergeClusters(analysis.analysis_id, clusterIds, customTitle));
+      setAnalysis(await mergeClusters(analysis, clusterIds, customTitle));
     } finally {
       setBusy(false);
     }
@@ -155,7 +155,17 @@ export function App() {
     if (!analysis) return;
     setBusy(true);
     try {
-      setAnalysis(await splitQuestion(analysis.analysis_id, clusterId, questionId));
+      setAnalysis(await splitQuestion(analysis, clusterId, questionId));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!analysis) return;
+    setBusy(true);
+    try {
+      await downloadRevisionPdf(analysis);
     } finally {
       setBusy(false);
     }
@@ -235,6 +245,7 @@ export function App() {
             onRecluster={handleRecluster}
             onMerge={handleMerge}
             onSplit={handleSplit}
+            onExportPdf={handleExportPdf}
             onReset={() => setAnalysis(null)}
             busy={busy}
           />

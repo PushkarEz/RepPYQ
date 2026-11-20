@@ -10,13 +10,13 @@ import {
 } from "lucide-react";
 import { AnalysisResponse, PriorityTier } from "../types";
 import { ClusterCard } from "./ClusterCard";
-import { getExportPdfUrl } from "../api/client";
 
 interface DashboardProps {
   analysis: AnalysisResponse;
   onRecluster: (threshold: number) => Promise<void>;
   onMerge: (clusterIds: string[], customTitle?: string) => Promise<void>;
   onSplit: (clusterId: string, questionId: string) => Promise<void>;
+  onExportPdf: () => Promise<void>;
   onReset: () => void;
   busy: boolean;
 }
@@ -28,6 +28,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onRecluster,
   onMerge,
   onSplit,
+  onExportPdf,
   onReset,
   busy,
 }) => {
@@ -148,12 +149,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <RotateCcw className="w-4 h-4" /> New Upload
             </button>
-            <a
-              href={getExportPdfUrl(analysis.analysis_id)}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs sm:text-sm font-medium hover:bg-slate-800 dark:hover:bg-white active:scale-[0.98] transition-all"
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onExportPdf}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 text-xs sm:text-sm font-medium hover:bg-slate-800 dark:hover:bg-white active:scale-[0.98] disabled:opacity-50 transition-all"
             >
               <Download className="w-4 h-4" /> Export Unit-Wise PDF
-            </a>
+            </button>
           </div>
         </div>
 

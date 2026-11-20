@@ -1,8 +1,6 @@
-import { AnalysisResponse } from "../types";
+import { AnalysisResponse, ExtractedQuestion, PaperInfo } from "../types";
 
-const API_BASE =
-  (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ||
-  "http://localhost:8000/api";
+const API_BASE = "/api";
 
 export async function recordPageVisit(): Promise<number> {
   const res = await fetch(`${API_BASE}/stats/visit`, { method: "POST" });
@@ -12,23 +10,25 @@ export async function recordPageVisit(): Promise<number> {
 }
 
 export async function detectPaperLabels(files: File[]) {
-  const form = new FormData();
-  files.forEach((f) => form.append("files", f));
-  const res = await fetch(`${API_BASE}/detect-labels`, {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) throw new Error("Failed to scan uploaded PDFs.");
-  return res.json() as Promise<{
-    papers: Array<{
-      filename: string;
-      suggested_label: string;
-      exam_type: string;
-      page_count: number;
-      used_ocr: boolean;
-      ocr_warning: string | null;
-    }>;
-  }>;
+  const papers = await Promise.all(
+    files.map(async (file) => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/detect-label`, { method: "POST", body: form });
+      if (!res.ok) {
+        return {
+          filename: file.name,
+          suggested_label: file.name.replace(/\.pdf$/i, ""),
+          exam_type: "Endsem",
+          page_count: 1,
+          used_ocr: false,
+          ocr_warning: null,
+        };
+      }
+      return res.json();
+    })
+  );
+  return { papers };
 }
 
 export async function analyzePdfs(params: {
@@ -38,65 +38,105 @@ export async function analyzePdfs(params: {
   threshold: number;
   syllabusText: string;
 }): Promise<AnalysisResponse> {
-  const form = new FormData();
-  params.files.forEach((f) => form.append("files", f));
-  form.append("paper_labels_json", JSON.stringify(params.labels));
-  form.append("subject_name", params.subjectName);
-  form.append("similarity_threshold", String(params.threshold));
-  form.append("syllabus_text", params.syllabusText);
+  // Extract 1 PDF per request in parallel so we never exceed Vercel's 4.5MB limit
+  const extractedList = await Promise.all(
+    params.files.map(async (file, i) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("paper_label", params.labels[i] || "");
+      const res = await fetch(`${API_BASE}/extract-paper`, { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Failed to read ${file.name}`);
+      }
+      return res.json() as Promise<{
+        paper: PaperInfo;
+        questions: ExtractedQuestion[];
+        warnings: string[];
+      }>;
+    })
+  );
 
-  const res = await fetch(`${API_BASE}/analyze`, {
+  const papers: PaperInfo[] = extractedList.map((e) => e.paper);
+  const questions: ExtractedQuestion[] = extractedList.flatMap((e) => e.questions);
+  const warnings: string[] = extractedList.flatMap((e) => e.warnings);
+
+  const groupRes = await fetch(`${API_BASE}/group`, {
     method: "POST",
-    body: form,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subject_name: params.subjectName,
+      similarity_threshold: params.threshold,
+      papers,
+      questions,
+      warnings,
+    }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Analysis failed.");
+
+  if (!groupRes.ok) {
+    const err = await groupRes.json().catch(() => ({}));
+    throw new Error(err.detail || "Grouping failed.");
   }
-  return res.json();
+  return groupRes.json();
 }
 
 export async function reclusterAnalysis(
-  analysisId: string,
+  analysis: AnalysisResponse,
   threshold: number
 ): Promise<AnalysisResponse> {
-  const res = await fetch(`${API_BASE}/analysis/${encodeURIComponent(analysisId)}/recluster`, {
+  const res = await fetch(`${API_BASE}/recluster`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ similarity_threshold: threshold }),
+    body: JSON.stringify({ analysis, similarity_threshold: threshold }),
   });
   if (!res.ok) throw new Error("Failed to recluster.");
   return res.json();
 }
 
 export async function mergeClusters(
-  analysisId: string,
+  analysis: AnalysisResponse,
   clusterIds: string[],
   customTitle?: string
 ): Promise<AnalysisResponse> {
-  const res = await fetch(`${API_BASE}/analysis/${encodeURIComponent(analysisId)}/merge`, {
+  const res = await fetch(`${API_BASE}/merge`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cluster_ids: clusterIds, custom_title: customTitle }),
+    body: JSON.stringify({ analysis, cluster_ids: clusterIds, custom_title: customTitle }),
   });
   if (!res.ok) throw new Error("Failed to merge clusters.");
   return res.json();
 }
 
 export async function splitQuestion(
-  analysisId: string,
+  analysis: AnalysisResponse,
   clusterId: string,
   questionId: string
 ): Promise<AnalysisResponse> {
-  const res = await fetch(`${API_BASE}/analysis/${encodeURIComponent(analysisId)}/split`, {
+  const res = await fetch(`${API_BASE}/split`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cluster_id: clusterId, question_id: questionId }),
+    body: JSON.stringify({ analysis, cluster_id: clusterId, question_id: questionId }),
   });
   if (!res.ok) throw new Error("Failed to split question.");
   return res.json();
 }
 
-export function getExportPdfUrl(analysisId: string): string {
-  return `${API_BASE}/analysis/${encodeURIComponent(analysisId)}/export-pdf`;
+export async function downloadRevisionPdf(analysis: AnalysisResponse): Promise<void> {
+  const res = await fetch(`${API_BASE}/export-pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(analysis),
+  });
+  if (!res.ok) throw new Error("Failed to generate PDF.");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safeName =
+    analysis.subject_name.replace(/[^a-zA-Z0-9 _-]/g, "_").trim() || "RepPYQ_Notes";
+  a.href = url;
+  a.download = `${safeName}_RepPYQ_Notes.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
